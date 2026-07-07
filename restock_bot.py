@@ -106,40 +106,44 @@ def esc(s):
     return html.escape(str(s))
 
 
+def _table(rows, cols):
+    """Bảng monospace canh cột. cols = [(tiêu đề, độ rộng, key, canh_phải?)]."""
+    def cell(v, w, right):
+        v = str(v)
+        if len(v) > w:
+            v = v[:w-1] + "…"
+        return v.rjust(w) if right else v.ljust(w)
+    head = " ".join(cell(t, w, r) for t, w, k, r in cols)
+    out = [head, "-" * len(head)]
+    for row in rows:
+        out.append(" ".join(cell(row[k], w, r) for t, w, k, r in cols))
+    return "<pre>" + esc("\n".join(out)) + "</pre>"
+
+
 def render(out, soon):
+    """Trả về danh sách tin nhắn (mỗi nhóm 1 tin để bảng <pre> không bị cắt)."""
     today = datetime.now().strftime("%d/%m/%Y")
-    lines = [f"<b>📦 CẢNH BÁO NHẬP HÀNG — {today}</b>",
-             f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày</i>", ""]
+    header = (f"<b>📦 CẢNH BÁO NHẬP HÀNG — {today}</b>\n"
+              f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày</i>")
     if not out and not soon:
-        lines.append("✅ Không có sản phẩm nào sắp hết. Kho ổn định.")
-        return "\n".join(lines)
+        return [header + "\n\n✅ Không có sản phẩm nào sắp hết. Kho ổn định."]
+    parts = [header]
     if out:
-        lines.append(f"🔴 <b>HẾT HÀNG mà đang bán ({len(out)}) — NHẬP GẤP</b>")
-        for r in out[:MAX_LIST]:
-            lines.append(f"• <b>{esc(r['code'])}</b> {esc(r['name'][:44])}\n"
-                         f"   bán {r['vel']}/ngày · tồn {r['oh']} · <b>nhập ~{r['need']}</b>")
-        if len(out) > MAX_LIST:
-            lines.append(f"   …và {len(out)-MAX_LIST} sp khác")
-        lines.append("")
+        cols = [("Mã", 12, "code", False), ("Bán", 5, "vel", True),
+                ("Nhập", 5, "need", True), ("Tên", 22, "sname", False)]
+        rows = [dict(r, sname=r["name"]) for r in out[:MAX_LIST]]
+        extra = f"\n…và {len(out)-MAX_LIST} sp khác" if len(out) > MAX_LIST else ""
+        parts.append(f"🔴 <b>HẾT HÀNG mà đang bán ({len(out)}) — NHẬP GẤP</b>\n" + _table(rows, cols) + extra)
     if soon:
-        lines.append(f"🟡 <b>SẮP HẾT (≤{SOON_DAYS} ngày) ({len(soon)})</b>")
-        for r in soon[:MAX_LIST]:
-            lines.append(f"• <b>{esc(r['code'])}</b> {esc(r['name'][:44])}\n"
-                         f"   còn <b>{r['dleft']:.1f} ngày</b> · tồn {r['oh']} · bán {r['vel']}/ngày · nhập ~{r['need']}")
-        if len(soon) > MAX_LIST:
-            lines.append(f"   …và {len(soon)-MAX_LIST} sp khác")
-    return "\n".join(lines)
+        cols = [("Mã", 12, "code", False), ("Ngày", 5, "sdleft", True), ("Tồn", 4, "oh", True),
+                ("Bán", 5, "vel", True), ("Nhập", 5, "need", True), ("Tên", 16, "sname", False)]
+        rows = [dict(r, sname=r["name"], sdleft=f"{r['dleft']:.1f}") for r in soon[:MAX_LIST]]
+        extra = f"\n…và {len(soon)-MAX_LIST} sp khác" if len(soon) > MAX_LIST else ""
+        parts.append(f"🟡 <b>SẮP HẾT (≤{SOON_DAYS} ngày) ({len(soon)})</b>\n" + _table(rows, cols) + extra)
+    return parts
 
 
-def send_telegram(text):
-    # Telegram giới hạn 4096 ký tự/tin -> cắt thành nhiều tin
-    parts, buf = [], ""
-    for line in text.split("\n"):
-        if len(buf) + len(line) + 1 > 3800:
-            parts.append(buf); buf = ""
-        buf += line + "\n"
-    if buf:
-        parts.append(buf)
+def send_telegram(parts):
     for part in parts:
         r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
                           json={"chat_id": TG_CHAT, "text": part, "parse_mode": "HTML",
@@ -159,9 +163,9 @@ def main():
     sold = sales_by_code(h)
     prods = products_onhand(h)
     out, soon = build(sold, prods)
-    text = render(out, soon)
-    print(f"🔴 {len(out)} hết hàng | 🟡 {len(soon)} sắp hết | gửi Telegram…")
-    send_telegram(text)
+    parts = render(out, soon)
+    print(f"🔴 {len(out)} hết hàng | 🟡 {len(soon)} sắp hết | gửi Telegram ({len(parts)} tin)…")
+    send_telegram(parts)
     print("Xong.")
 
 
