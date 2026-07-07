@@ -1,0 +1,29 @@
+name: Restock Alert
+
+on:
+  schedule:
+    # 01:25 UTC ≈ 08:25 sáng VN (tránh phút :00 hay bị trễ/drop)
+    - cron: '25 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  restock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Gửi cảnh báo nhập hàng
+        env:
+          KIOT_CLIENT_ID: ${{ secrets.KIOT_CLIENT_ID }}
+          KIOT_CLIENT_SECRET: ${{ secrets.KIOT_CLIENT_SECRET }}
+          KIOT_RETAILER: ${{ secrets.KIOT_RETAILER }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          LOOKBACK_DAYS: '30'
+          SOON_DAYS: '14'
+          MIN_VEL: '0.1'
+          COVER_DAYS: '30'
+        run: python restock_bot.py
