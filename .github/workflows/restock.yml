@@ -6,6 +6,9 @@ on:
     - cron: '25 1 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write        # cần để commit heartbeat giữ cron sống
+
 jobs:
   restock:
     runs-on: ubuntu-latest
@@ -27,3 +30,13 @@ jobs:
           MIN_VEL: '0.1'
           COVER_DAYS: '30'
         run: python restock_bot.py
+
+      - name: Keepalive (giữ cron không bị GitHub tạm ngưng sau 60 ngày)
+        if: always()
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > last_run.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_run.txt
+          git commit -m "chore: heartbeat $(date -u +%F)" || exit 0
+          git push
