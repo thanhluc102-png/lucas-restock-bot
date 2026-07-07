@@ -27,6 +27,22 @@ MAX_LIST      = int(os.getenv("MAX_LIST", "40"))        # tối đa mỗi nhóm 
 
 KIOT = "https://public.kiotapi.com"
 
+# Thương hiệu (từ KiotViet /trademark) — khớp theo tên sp. Dài trước để "HyperWork" thắng "Hyper".
+BRANDS = ["AhaStyle", "Anank", "Anker", "Aulumu", "Baseus", "BMX", "Coteetci", "Divoom",
+          "Elago", "HODA", "HyperWork", "Hyper", "IDMIX", "inateck", "Innostyle", "JCPAL",
+          "Jinya", "JOWAY", "JRC", "LISEN", "Lofree", "Lucas", "Maxco", "Mipow", "Mocoll",
+          "Nillkin", "NJOYNY", "Pitaka", "Satechi", "Sharge", "SKINARMA", "Thule", "Tomtoc",
+          "Torras", "Ulanzi", "Urr", "WIWU", "Zagg"]
+_BRANDS_SORTED = sorted(BRANDS, key=len, reverse=True)
+
+
+def brand_of(name):
+    low = (name or "").lower()
+    for b in _BRANDS_SORTED:
+        if b.lower() in low:
+            return b
+    return "Khác"
+
 
 def get_token():
     r = requests.post("https://id.kiotviet.vn/connect/token",
@@ -121,25 +137,48 @@ def _table(rows, cols):
 
 
 def render(out, soon):
-    """Trả về danh sách tin nhắn (mỗi nhóm 1 tin để bảng <pre> không bị cắt)."""
+    """Gom theo THƯƠNG HIỆU (để đặt hàng từng nhà cung cấp). Mỗi tin gộp nhiều brand, không cắt <pre>."""
     today = datetime.now().strftime("%d/%m/%Y")
     header = (f"<b>📦 CẢNH BÁO NHẬP HÀNG — {today}</b>\n"
-              f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày</i>")
+              f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày · 🔴 hết · 🟡 sắp hết</i>")
     if not out and not soon:
         return [header + "\n\n✅ Không có sản phẩm nào sắp hết. Kho ổn định."]
-    parts = [header]
-    if out:
-        cols = [("Mã", 12, "code", False), ("Bán", 5, "vel", True),
-                ("Nhập", 5, "need", True), ("Tên", 22, "sname", False)]
-        rows = [dict(r, sname=r["name"]) for r in out[:MAX_LIST]]
-        extra = f"\n…và {len(out)-MAX_LIST} sp khác" if len(out) > MAX_LIST else ""
-        parts.append(f"🔴 <b>HẾT HÀNG mà đang bán ({len(out)}) — NHẬP GẤP</b>\n" + _table(rows, cols) + extra)
-    if soon:
-        cols = [("Mã", 12, "code", False), ("Ngày", 5, "sdleft", True), ("Tồn", 4, "oh", True),
-                ("Bán", 5, "vel", True), ("Nhập", 5, "need", True), ("Tên", 16, "sname", False)]
-        rows = [dict(r, sname=r["name"], sdleft=f"{r['dleft']:.1f}") for r in soon[:MAX_LIST]]
-        extra = f"\n…và {len(soon)-MAX_LIST} sp khác" if len(soon) > MAX_LIST else ""
-        parts.append(f"🟡 <b>SẮP HẾT (≤{SOON_DAYS} ngày) ({len(soon)})</b>\n" + _table(rows, cols) + extra)
+
+    # gộp 2 nhóm, gắn trạng thái + brand
+    items = []
+    for r in out:
+        items.append(dict(r, st="HẾT", crit=0, brand=brand_of(r["name"])))
+    for r in soon:
+        items.append(dict(r, st=f"{r['dleft']:.0f}d", crit=1, brand=brand_of(r["name"])))
+
+    groups = defaultdict(list)
+    for it in items:
+        groups[it["brand"]].append(it)
+    # brand nhiều "hết hàng" nhất lên trước, rồi theo tổng cần nhập
+    order = sorted(groups, key=lambda b: (-sum(1 for i in groups[b] if i["crit"] == 0),
+                                          -sum(i["need"] for i in groups[b])))
+    cols = [("Mã", 12, "code", False), ("TT", 4, "st", True), ("Tồn", 4, "oh", True),
+            ("Bán", 4, "vel", True), ("Nhập", 5, "need", True), ("Tên", 20, "name", False)]
+
+    blocks = []
+    total_urgent = sum(1 for i in items if i["crit"] == 0)
+    for b in order:
+        g = sorted(groups[b], key=lambda i: (i["crit"], -i["vel"]))
+        n_out = sum(1 for i in g if i["crit"] == 0)
+        tag = f"🏷️ <b>{esc(b)}</b> ({len(g)} sp{', ' + str(n_out) + ' hết' if n_out else ''})"
+        blocks.append(tag + "\n" + _table(g, cols))
+
+    # đóng gói: header + các block, sang tin mới khi gần 3800 ký tự (không cắt giữa block)
+    parts = [f"{header}\n\n<b>Tổng: {len(items)} sp cần nhập</b> · 🔴 {total_urgent} hết hàng · {len(order)} thương hiệu"]
+    buf = ""
+    for blk in blocks:
+        if len(buf) + len(blk) + 2 > 3800:
+            if buf:
+                parts.append(buf)
+            buf = ""
+        buf += ("\n\n" if buf else "") + blk
+    if buf:
+        parts.append(buf)
     return parts
 
 
