@@ -27,13 +27,38 @@ MAX_LIST      = int(os.getenv("MAX_LIST", "40"))        # tối đa mỗi nhóm 
 
 KIOT = "https://public.kiotapi.com"
 
-# Thương hiệu (từ KiotViet /trademark) — khớp theo tên sp. Dài trước để "HyperWork" thắng "Hyper".
+# Thương hiệu & Nhà Phân Phối (NPP)
 BRANDS = ["AhaStyle", "Anank", "Anker", "Aulumu", "Baseus", "BMX", "Coteetci", "Divoom",
           "Elago", "HODA", "HyperWork", "Hyper", "IDMIX", "inateck", "Innostyle", "JCPAL",
           "Jinya", "JOWAY", "JRC", "LISEN", "Lofree", "Lucas", "Maxco", "Mipow", "Mocoll",
           "Nillkin", "NJOYNY", "Pitaka", "Satechi", "Sharge", "SKINARMA", "Thule", "Tomtoc",
-          "Torras", "Ulanzi", "Urr", "WIWU", "Zagg"]
+          "Torras", "Ulanzi", "Urr", "WIWU", "Zagg", "UNIQ"]
 _BRANDS_SORTED = sorted(BRANDS, key=len, reverse=True)
+
+NPP_MAP = {
+    # HD: Thule, Innostyle, Tomtoc, BMX, Hyper, Mipow
+    "thule": "HD", "innostyle": "HD", "tomtoc": "HD", "bmx": "HD", "hyper": "HD", "hyperwork": "HD", "mipow": "HD",
+    # Viettel Distribution: Anker
+    "anker": "Viettel Distribution",
+    # iFuture: Aulumu, Lisen
+    "aulumu": "iFuture", "lisen": "iFuture",
+    # ACE: JRC, Inateck
+    "jrc": "ACE", "inateck": "ACE",
+    # Senco: JCPAL, IDMIX, Mocoll
+    "jcpal": "Senco", "idmix": "Senco", "mocoll": "Senco",
+    # Tuấn Anh: Hoda, Joway, Maxco, Nillkin, WIWU
+    "hoda": "Tuấn Anh", "joway": "Tuấn Anh", "maxco": "Tuấn Anh", "nillkin": "Tuấn Anh", "wiwu": "Tuấn Anh",
+    # DTR: Pitaka, Zagg
+    "pitaka": "DTR", "zagg": "DTR",
+    # TLC: Uniq, Skinarma
+    "uniq": "TLC", "skinarma": "TLC",
+    # Huy Linh: Ulanzi
+    "ulanzi": "Huy Linh",
+    # Lucas: Lucas
+    "lucas": "Lucas",
+    # StreamCast: Satechi, Sharge
+    "satechi": "StreamCast", "sharge": "StreamCast",
+}
 
 
 def brand_of(name):
@@ -42,6 +67,10 @@ def brand_of(name):
         if b.lower() in low:
             return b
     return "Khác"
+
+
+def npp_of(brand):
+    return NPP_MAP.get((brand or "").lower(), "Khác")
 
 
 def get_token():
@@ -107,8 +136,10 @@ def build(sold, prods):
             continue
         oh = p["onHand"]; dleft = oh / vel if vel > 0 else 9999
         need = max(0, round(vel * COVER_DAYS - oh))
+        b = brand_of(p["name"])
+        n = npp_of(b)
         rec = {"code": code, "name": p["name"], "oh": oh, "vel": round(vel, 1),
-               "dleft": dleft, "need": need, "qty": int(qty)}
+               "dleft": dleft, "need": need, "qty": int(qty), "brand": b, "npp": n}
         if oh <= 0:
             out.append(rec)
         elif dleft <= SOON_DAYS:
@@ -137,39 +168,44 @@ def _table(rows, cols):
 
 
 def render(out, soon):
-    """Gom theo THƯƠNG HIỆU (để đặt hàng từng nhà cung cấp). Mỗi tin gộp nhiều brand, không cắt <pre>."""
+    """Gom theo NHÀ PHÂN PHỐI (NPP) để đặt hàng. Mỗi tin gộp nhiều NPP, không cắt <pre>."""
     today = datetime.now().strftime("%d/%m/%Y")
     header = (f"<b>📦 CẢNH BÁO NHẬP HÀNG — {today}</b>\n"
               f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày · 🔴 hết · 🟡 sắp hết</i>")
     if not out and not soon:
         return [header + "\n\n✅ Không có sản phẩm nào sắp hết. Kho ổn định."]
 
-    # gộp 2 nhóm, gắn trạng thái + brand
+    # gộp 2 nhóm, gắn trạng thái + brand + npp
     items = []
     for r in out:
-        items.append(dict(r, st="HẾT", crit=0, brand=brand_of(r["name"])))
+        b = r.get("brand") or brand_of(r["name"])
+        n = r.get("npp") or npp_of(b)
+        items.append(dict(r, st="HẾT", crit=0, brand=b, npp=n))
     for r in soon:
-        items.append(dict(r, st=f"{r['dleft']:.0f}d", crit=1, brand=brand_of(r["name"])))
+        b = r.get("brand") or brand_of(r["name"])
+        n = r.get("npp") or npp_of(b)
+        items.append(dict(r, st=f"{r['dleft']:.0f}d", crit=1, brand=b, npp=n))
 
     groups = defaultdict(list)
     for it in items:
-        groups[it["brand"]].append(it)
-    # brand nhiều "hết hàng" nhất lên trước, rồi theo tổng cần nhập
-    order = sorted(groups, key=lambda b: (-sum(1 for i in groups[b] if i["crit"] == 0),
-                                          -sum(i["need"] for i in groups[b])))
+        groups[it["npp"]].append(it)
+    # npp nhiều "hết hàng" nhất lên trước, rồi theo tổng cần nhập
+    order = sorted(groups, key=lambda n: (-sum(1 for i in groups[n] if i["crit"] == 0),
+                                          -sum(i["need"] for i in groups[n])))
     cols = [("Mã", 12, "code", False), ("TT", 4, "st", True), ("Tồn", 4, "oh", True),
             ("Bán", 4, "vel", True), ("Nhập", 5, "need", True), ("Tên", 20, "name", False)]
 
     blocks = []
     total_urgent = sum(1 for i in items if i["crit"] == 0)
-    for b in order:
-        g = sorted(groups[b], key=lambda i: (i["crit"], -i["vel"]))
+    for n in order:
+        g = sorted(groups[n], key=lambda i: (i["crit"], -i["vel"]))
         n_out = sum(1 for i in g if i["crit"] == 0)
-        tag = f"🏷️ <b>{esc(b)}</b> ({len(g)} sp{', ' + str(n_out) + ' hết' if n_out else ''})"
+        brands_in_npp = ", ".join(sorted(set(i["brand"] for i in g)))
+        tag = f"🏢 <b>NPP {esc(n)}</b> <i>({brands_in_npp})</i> — {len(g)} sp{', ' + str(n_out) + ' hết' if n_out else ''}"
         blocks.append(tag + "\n" + _table(g, cols))
 
     # đóng gói: header + các block, sang tin mới khi gần 3800 ký tự (không cắt giữa block)
-    parts = [f"{header}\n\n<b>Tổng: {len(items)} sp cần nhập</b> · 🔴 {total_urgent} hết hàng · {len(order)} thương hiệu"]
+    parts = [f"{header}\n\n<b>Tổng: {len(items)} sp cần nhập</b> · 🔴 {total_urgent} hết hàng · {len(order)} Nhà Phân Phối (NPP)"]
     buf = ""
     for blk in blocks:
         if len(buf) + len(blk) + 2 > 3800:
