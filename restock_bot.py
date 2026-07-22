@@ -192,6 +192,22 @@ def send_telegram(parts):
         time.sleep(0.5)
 
 
+def send_telegram_document(file_path, caption=""):
+    if not TG_TOKEN or not TG_CHAT or not os.path.exists(file_path):
+        return
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendDocument"
+    try:
+        with open(file_path, "rb") as f:
+            r = requests.post(url, data={"chat_id": TG_CHAT, "caption": caption, "parse_mode": "HTML"},
+                              files={"document": f}, timeout=60)
+            if not r.ok:
+                print("Telegram sendDocument lỗi:", r.status_code, r.text[:200])
+            else:
+                print(f"[+] Đã gửi file Excel {os.path.basename(file_path)} qua Telegram!")
+    except Exception as e:
+        print(f"[!] Lỗi gửi file qua Telegram: {e}")
+
+
 def main():
     missing = [k for k, v in {"KIOT_CLIENT_ID": CID, "KIOT_CLIENT_SECRET": CS,
                               "TG_TOKEN": TG_TOKEN, "TG_CHAT_ID": TG_CHAT}.items() if not v]
@@ -205,6 +221,18 @@ def main():
     parts = render(out, soon)
     print(f"🔴 {len(out)} hết hàng | 🟡 {len(soon)} sắp hết | gửi Telegram ({len(parts)} tin)…")
     send_telegram(parts)
+
+    # Xuất file Excel PO
+    try:
+        from export_po import export_po_excel
+        po_res = export_po_excel(out, soon, cover_days=COVER_DAYS)
+        if po_res and po_res.get("master_file"):
+            master_path = po_res["master_file"]
+            caption = f"📊 <b>FILE EXCEL PO NHẬP HÀNG</b>\n<i>Đã phân loại theo {len(po_res.get('brand_files', {}))} Thương hiệu/NPP. Mở file để xem chi tiết!</i>"
+            send_telegram_document(master_path, caption)
+    except Exception as e:
+        print(f"[!] Lỗi xuất/gửi Excel PO: {e}")
+
     print("Xong.")
 
 
