@@ -158,13 +158,21 @@ def build(sales_history, prods):
         n = npp_of(b)
 
         if oh <= 0:
-            # TỒN = 0: Lấy ngày bán gần nhất làm mốc, quét lùi 7 ngày về trước đó
+            # TỒN = 0: Tìm cửa sổ 7 ngày bán tốt nhất (Peak 7-day Window) trong khoảng thời gian có đơn
+            # Tránh bẫy "đơn bán lẻ giọt đắng" khi cạn kho làm sụt giảm giả tạo vận tốc bán.
             last_sale_dt = max(dt for dt, _ in sales)
-            window_start = last_sale_dt - timedelta(days=7)
+            max_7d_qty = 0
 
-            # Tổng SL bán trong 7 ngày mở bán gần nhất
-            qty_7d = sum(q for dt, q in sales if window_start <= dt <= last_sale_dt)
-            vel = qty_7d / 7.0
+            # Lướt qua các cửa sổ 7 ngày trong vòng 60 ngày gần nhất
+            for i in range(53):
+                w_end = last_sale_dt - timedelta(days=i)
+                w_start = w_end - timedelta(days=7)
+                q = sum(qty for dt, qty in sales if w_start <= dt <= w_end)
+                if q > max_7d_qty:
+                    max_7d_qty = q
+
+            # Vận tốc bán trung bình ngày trong tuần cao điểm có hàng
+            vel = max_7d_qty / 7.0
 
             if vel < MIN_VEL:
                 continue
@@ -172,7 +180,7 @@ def build(sales_history, prods):
             dleft = 0
             need = max(1, round(vel * COVER_DAYS))
             rec = {"code": code, "name": p["name"], "oh": oh, "vel": round(vel, 1),
-                   "dleft": dleft, "need": need, "qty": int(qty_7d), "brand": b, "npp": n,
+                   "dleft": dleft, "need": need, "qty": int(max_7d_qty), "brand": b, "npp": n,
                    "last_sale": last_sale_dt.strftime("%d/%m")}
             out.append(rec)
         else:
