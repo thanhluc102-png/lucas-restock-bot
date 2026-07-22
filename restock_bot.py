@@ -42,7 +42,9 @@ _BRANDS_SORTED = sorted(BRANDS, key=len, reverse=True)
 
 NPP_MAP = {
     # HD: Thule, Innostyle, Tomtoc, BMX, Hyper, Mipow
-    "thule": "HD", "innostyle": "HD", "tomtoc": "HD", "bmx": "HD", "hyper": "HD", "hyperwork": "HD", "mipow": "HD",
+    "thule": "HD", "innostyle": "HD", "tomtoc": "HD", "bmx": "HD", "hyper": "HD", "mipow": "HD",
+    # 3HVN: HyperWork
+    "hyperwork": "3HVN",
     # Viettel Distribution: Anker
     "anker": "Viettel Distribution",
     # iFuture: Aulumu, Lisen

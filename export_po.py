@@ -67,8 +67,10 @@ NPP_MAP = {
     "tomtoc": "HD",
     "bmx": "HD",
     "hyper": "HD",
-    "hyperwork": "HD",
     "mipow": "HD",
+
+    # 3HVN: HyperWork
+    "hyperwork": "3HVN",
 
     # Viettel Distribution: Anker
     "anker": "Viettel Distribution",
