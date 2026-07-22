@@ -89,11 +89,15 @@ def get_token():
     return r.json()["access_token"]
 
 
-def sales_by_code(h):
-    """Tổng số lượng bán mỗi mã trong LOOKBACK_DAYS (bỏ hóa đơn hủy status==2)."""
-    frm = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+def sales_by_code(h, fetch_days=60):
+    """
+    Lấy danh sách các giao dịch bán của từng mã SP trong fetch_days ngày gần đây.
+    Trả về dict: {product_code: [(datetime_obj, quantity), ...]}
+    """
+    frm = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
     to  = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    sold = defaultdict(float); cur = 0; total = None
+    sales_history = defaultdict(list)
+    cur = 0; total = None
     while True:
         d = requests.get(f"{KIOT}/invoices", headers=h, timeout=60,
                          params={"pageSize": 100, "currentItem": cur,
@@ -104,13 +108,22 @@ def sales_by_code(h):
         for inv in data:
             if inv.get("status") == 2:   # Đã hủy
                 continue
+            p_date_str = inv.get("createdDate") or inv.get("purchaseDate") or ""
+            try:
+                dt = datetime.fromisoformat(p_date_str.split(".")[0].replace("Z", ""))
+            except Exception:
+                dt = datetime.now()
+
             for it in inv.get("invoiceDetails") or []:
-                sold[it.get("productCode")] += (it.get("quantity") or 0)
+                code = it.get("productCode")
+                qty = it.get("quantity") or 0
+                if code and qty > 0:
+                    sales_history[code].append((dt, qty))
         cur += len(data)
         if total is None or cur >= total:
             break
         time.sleep(0.04)
-    return sold
+    return sales_history
 
 
 def products_onhand(h):
@@ -132,25 +145,52 @@ def products_onhand(h):
     return prods
 
 
-def build(sold, prods):
+def build(sales_history, prods):
     out, soon = [], []
-    for code, qty in sold.items():
+    now = datetime.now()
+
+    for code, sales in sales_history.items():
         p = prods.get(code)
         if not p or not p.get("active"):
             continue
-        vel = qty / LOOKBACK_DAYS
-        if vel < MIN_VEL:
-            continue
-        oh = p["onHand"]; dleft = oh / vel if vel > 0 else 9999
-        need = max(0, round(vel * COVER_DAYS - oh))
+        oh = p["onHand"]
         b = brand_of(p["name"])
         n = npp_of(b)
-        rec = {"code": code, "name": p["name"], "oh": oh, "vel": round(vel, 1),
-               "dleft": dleft, "need": need, "qty": int(qty), "brand": b, "npp": n}
+
         if oh <= 0:
+            # TỒN = 0: Lấy ngày bán gần nhất làm mốc, quét lùi 7 ngày về trước đó
+            last_sale_dt = max(dt for dt, _ in sales)
+            window_start = last_sale_dt - timedelta(days=7)
+
+            # Tổng SL bán trong 7 ngày mở bán gần nhất
+            qty_7d = sum(q for dt, q in sales if window_start <= dt <= last_sale_dt)
+            vel = qty_7d / 7.0
+
+            if vel < MIN_VEL:
+                continue
+
+            dleft = 0
+            need = max(1, round(vel * COVER_DAYS))
+            rec = {"code": code, "name": p["name"], "oh": oh, "vel": round(vel, 1),
+                   "dleft": dleft, "need": need, "qty": int(qty_7d), "brand": b, "npp": n,
+                   "last_sale": last_sale_dt.strftime("%d/%m")}
             out.append(rec)
-        elif dleft <= SOON_DAYS:
-            soon.append(rec)
+        else:
+            # TỒN > 0: Tính vận tốc bán trong LOOKBACK_DAYS gần nhất tính từ hôm nay
+            cutoff = now - timedelta(days=LOOKBACK_DAYS)
+            qty_lookback = sum(q for dt, q in sales if dt >= cutoff)
+            vel = qty_lookback / float(LOOKBACK_DAYS)
+
+            if vel < MIN_VEL:
+                continue
+
+            dleft = oh / vel if vel > 0 else 9999
+            need = max(0, round(vel * COVER_DAYS - oh))
+            rec = {"code": code, "name": p["name"], "oh": oh, "vel": round(vel, 1),
+                   "dleft": dleft, "need": need, "qty": int(qty_lookback), "brand": b, "npp": n}
+            if dleft <= SOON_DAYS:
+                soon.append(rec)
+
     out.sort(key=lambda r: -r["vel"])
     soon.sort(key=lambda r: r["dleft"])
     return out, soon
@@ -178,7 +218,7 @@ def render(out, soon):
     """Gom theo NHÀ PHÂN PHỐI (NPP) để đặt hàng. Mỗi tin gộp nhiều NPP, không cắt <pre>."""
     today = datetime.now().strftime("%d/%m/%Y")
     header = (f"<b>📦 CẢNH BÁO NHẬP HÀNG — {today}</b>\n"
-              f"<i>Vận tốc bán {LOOKBACK_DAYS} ngày · gợi ý nhập đủ bán {COVER_DAYS} ngày · 🔴 hết · 🟡 sắp hết</i>")
+              f"<i>🔴 Hết hàng: Vận tốc tính 7 ngày lùi từ đơn cuối · 🟡 Sắp hết: {LOOKBACK_DAYS} ngày gần đây · Dự trữ {COVER_DAYS} ngày</i>")
     if not out and not soon:
         return [header + "\n\n✅ Không có sản phẩm nào sắp hết. Kho ổn định."]
 
