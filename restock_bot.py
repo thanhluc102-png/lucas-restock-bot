@@ -14,6 +14,11 @@ import os, time, sys, html
 from datetime import datetime, timedelta
 from collections import defaultdict
 import requests
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ---- Cấu hình (env) ----
 CID = os.getenv("KIOT_CLIENT_ID"); CS = os.getenv("KIOT_CLIENT_SECRET")
