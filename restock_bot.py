@@ -158,20 +158,38 @@ def build(sales_history, prods):
         n = npp_of(b)
 
         if oh <= 0:
-            # TỒN = 0: Tìm cửa sổ 7 ngày bán tốt nhất (Peak 7-day Window) trong khoảng thời gian có đơn
+            # TỒN = 0: Tìm cửa sổ 7 ngày bán cao nhất (Peak 7-day Window) khi sản phẩm còn đủ hàng kho.
             # Tránh bẫy "đơn bán lẻ giọt đắng" khi cạn kho làm sụt giảm giả tạo vận tốc bán.
             last_sale_dt = max(dt for dt, _ in sales)
+            cutoff_60 = last_sale_dt - timedelta(days=60)
+            
+            # Gom doanh số theo từng ngày (YYYY-MM-DD) trong vòng 60 ngày trước đơn cuối
+            daily_sales = defaultdict(float)
+            for dt, q in sales:
+                if dt >= cutoff_60:
+                    daily_sales[dt.date()] += q
+
+            if not daily_sales:
+                continue
+
+            min_date = min(daily_sales.keys())
+            max_date = max(daily_sales.keys())
+            days_span = (max_date - min_date).days + 1
+
             max_7d_qty = 0
+            if days_span <= 7:
+                max_7d_qty = sum(daily_sales.values())
+            else:
+                # Quét cửa sổ 7 ngày trượt theo từng ngày
+                curr_date = min_date
+                while curr_date <= max_date - timedelta(days=6):
+                    w_start = curr_date
+                    w_end = curr_date + timedelta(days=6)
+                    q = sum(qty for d, qty in daily_sales.items() if w_start <= d <= w_end)
+                    if q > max_7d_qty:
+                        max_7d_qty = q
+                    curr_date += timedelta(days=1)
 
-            # Lướt qua các cửa sổ 7 ngày trong vòng 60 ngày gần nhất
-            for i in range(53):
-                w_end = last_sale_dt - timedelta(days=i)
-                w_start = w_end - timedelta(days=7)
-                q = sum(qty for dt, qty in sales if w_start <= dt <= w_end)
-                if q > max_7d_qty:
-                    max_7d_qty = q
-
-            # Vận tốc bán trung bình ngày trong tuần cao điểm có hàng
             vel = max_7d_qty / 7.0
 
             if vel < MIN_VEL:
