@@ -26,7 +26,7 @@
 ### 3. Telegram Stock Notification Group
 - Target Telegram Group: **LucasStock**
 - **Chat ID**: `-5352305526`
-- **Bot Token**: `8242451016:AAEvo3IxhdEqZm20GM2QjZ_DrFfaC5jEva4`
+- **Bot Token**: đọc từ biến môi trường `TG_TOKEN` (đặt trong GitHub Secrets — không lưu trong repo).
 
 ### 4. Cash Flow & Platform Payout Delay Rules
 - **Shopee / TikTok Shop Payout**: 14-day delay before sales revenue clears into bank account.
